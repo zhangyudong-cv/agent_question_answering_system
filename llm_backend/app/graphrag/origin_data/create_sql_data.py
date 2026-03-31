@@ -8,10 +8,10 @@ import os
 
 # 数据库连接信息
 DB_CONFIG = {
-    'host': 'localhost',
-    'port': 3306,
+    'host': '192.168.100.128',
+    'port': 3307,
     'user': 'root',
-    'password': '1234',
+    'password': '123',
     'database': 'graphrag'
 }
 
