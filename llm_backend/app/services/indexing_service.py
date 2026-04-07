@@ -39,11 +39,12 @@ class IndexingService:
         """根据文件类型获取对应的配置文件"""
         return self.config_mapping.get(file_type, self.default_config)
     
-    def _check_existing_index(self, file_path: str, output_dir: str) -> bool:
-        """检查文件是否已经建立索引"""
-        file_name = Path(file_path).stem
-        index_path = os.path.join(output_dir, f"{file_name}_index")
-        return os.path.exists(index_path)
+    def _check_existing_index(self, output_dir: str) -> bool:
+        """检查是否存在任何已有的索引数据，决定是否执行增量更新"""
+        # GraphRAG 成功完成索引后会在 output 目录下生成多个 parquet 文件
+        # 我们通过检查最终文档是否存在来判断
+        check_file = os.path.join(output_dir, "create_final_documents.parquet")
+        return os.path.exists(check_file)
     
     def _prepare_user_directories(self, user_id: int) -> tuple:
         """为用户准备目录。由于取消了隔离，直接返回根目录。"""
@@ -86,8 +87,8 @@ class IndexingService:
             config_file = self._get_config_file(file_type)
             logger.info(f"使用配置文件: {config_file}")
             
-            # 检查是否需要增量更新
-            is_update = self._check_existing_index(input_file_path, user_output_dir)
+            # 检查是否需要增量更新（全局判断）
+            is_update = self._check_existing_index(user_output_dir)
             
             # 准备配置
             config_path = os.path.join(self.data_dir, config_file)
@@ -99,8 +100,8 @@ class IndexingService:
             config_overrides = {
                 'input.base_dir': user_input_dir,
                 'output.base_dir': user_output_dir,
-                # 更新文件匹配模式以匹配文件名
-                'input.file_pattern': f".*{os.path.basename(input_file_path)}$$"
+                # 不再限制文件模式，让 GraphRAG 扫描 input 目录下所有文件实现叠加
+                'input.file_pattern': ".*"
             }
             
             # 加载配置

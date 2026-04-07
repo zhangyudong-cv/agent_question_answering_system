@@ -17,7 +17,9 @@ from app.core.logger import get_logger
 from typing import cast, Literal, TypedDict, List, Dict, Any
 from langchain_core.messages import BaseMessage
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.redis import AsyncRedisSaver
 from langgraph.graph import END, START, StateGraph
+from langchain_core.messages import BaseMessage, RemoveMessage
 from app.lg_agent.lg_states import AgentState, InputState, Router, GradeHallucinations
 from app.lg_agent.kg_sub_graph.agentic_rag_agents.retrievers.cypher_examples.northwind_retriever import NorthwindCypherRetriever
 from app.lg_agent.kg_sub_graph.agentic_rag_agents.components.planner.node import create_planner_node
@@ -54,6 +56,21 @@ class AdditionalGuardrailsOutput(BaseModel):
 # 构建日志记录器
 logger = get_logger(service="lg_builder")
 
+async def manage_memory(state: AgentState) -> dict:
+    """滑动窗口管理：只保留最近的 5 轮对话（10 条消息）。
+    
+    该节点通过返回 RemoveMessage 指令集，通知 LangGraph 归约器删除 Redis 中的老旧消息，
+    从而确保输入 LLM 的上下文始终保持在最近 5 轮以内。
+    """
+    # 5 轮对话通常包含 5 个 HumanMessage 和 5 个 AIMessage，共 10 条
+    MAX_MESSAGES = 10
+    if len(state.messages) > MAX_MESSAGES:
+        # 获取最老的、需要删除的消息
+        to_delete = state.messages[:-MAX_MESSAGES]
+        logger.info(f"🛠️ 触发滑动窗口清理：正在从 Redis 删除 {len(to_delete)} 条过期对话记录")
+        return {"messages": [RemoveMessage(id=m.id) for m in to_delete if m.id]}
+    return {}
+
 async def analyze_and_route_query(
     state: AgentState, *, config: RunnableConfig
 ) -> dict[str, Router]:
@@ -71,7 +88,13 @@ async def analyze_and_route_query(
     """
     # 选择模型实例，通过.env文件中的AGENT_SERVICE参数选择
     if settings.AGENT_SERVICE == ServiceType.DEEPSEEK:
-        model = ChatDeepSeek(api_key=settings.DEEPSEEK_API_KEY, model_name=settings.DEEPSEEK_MODEL, temperature=0.7, tags=["router"])
+        model = ChatDeepSeek(
+            api_key=settings.DEEPSEEK_API_KEY, 
+            model_name=settings.DEEPSEEK_MODEL, 
+            temperature=0.7, 
+            request_timeout=120,  # 增加超时时间到 120 秒
+            tags=["router"]
+        )
         logger.info(f"Using DeepSeek model: {settings.DEEPSEEK_MODEL}")
     else:
         model = ChatOllama(model=settings.OLLAMA_AGENT_MODEL, base_url=settings.OLLAMA_BASE_URL, temperature=0.7, tags=["router"])
@@ -140,7 +163,13 @@ async def respond_to_general_query(
     
     # 使用大模型生成回复
     if settings.AGENT_SERVICE == ServiceType.DEEPSEEK:
-        model = ChatDeepSeek(api_key=settings.DEEPSEEK_API_KEY, model_name=settings.DEEPSEEK_MODEL, temperature=0.7, tags=["general_query"])
+        model = ChatDeepSeek(
+            api_key=settings.DEEPSEEK_API_KEY, 
+            model_name=settings.DEEPSEEK_MODEL, 
+            temperature=0.7, 
+            request_timeout=120,  # 增加超时时间到 120 秒
+            tags=["general_query"]
+        )
     else:
         model = ChatOllama(model=settings.OLLAMA_AGENT_MODEL, base_url=settings.OLLAMA_BASE_URL, temperature=0.7, tags=["general_query"])
     
@@ -170,7 +199,13 @@ async def get_additional_info(
     
     # 使用大模型生成回复
     if settings.AGENT_SERVICE == ServiceType.DEEPSEEK:
-        model = ChatDeepSeek(api_key=settings.DEEPSEEK_API_KEY, model_name=settings.DEEPSEEK_MODEL, temperature=0.7, tags=["additional_info"])
+        model = ChatDeepSeek(
+            api_key=settings.DEEPSEEK_API_KEY, 
+            model_name=settings.DEEPSEEK_MODEL, 
+            temperature=0.7, 
+            request_timeout=120,  # 增加超时时间到 120 秒
+            tags=["additional_info"]
+        )
     else:
         model = ChatOllama(model=settings.OLLAMA_AGENT_MODEL, base_url=settings.OLLAMA_BASE_URL, temperature=0.7, tags=["additional_info"])
 
@@ -353,7 +388,13 @@ async def create_image_query(
                     
                     # 构建回复请求
                     if settings.AGENT_SERVICE == ServiceType.DEEPSEEK:
-                        model = ChatDeepSeek(api_key=settings.DEEPSEEK_API_KEY, model_name=settings.DEEPSEEK_MODEL, temperature=0.7, tags=["image_query"])
+                        model = ChatDeepSeek(
+                            api_key=settings.DEEPSEEK_API_KEY, 
+                            model_name=settings.DEEPSEEK_MODEL, 
+                            temperature=0.7, 
+                            request_timeout=120,  # 增加超时时间到 120 秒
+                            tags=["image_query"]
+                        )
                     else:
                         model = ChatOllama(model=settings.OLLAMA_AGENT_MODEL, base_url=settings.OLLAMA_BASE_URL, temperature=0.7, tags=["image_query"])
                     # 使用专门的图片查询提示模板
@@ -400,7 +441,13 @@ async def create_research_plan(
 
     # 使用大模型生成查询/多跳、并行查询计划
     if settings.AGENT_SERVICE == ServiceType.DEEPSEEK:
-        model = ChatDeepSeek(api_key=settings.DEEPSEEK_API_KEY, model_name=settings.DEEPSEEK_MODEL, temperature=0.7, tags=["research_plan"])
+        model = ChatDeepSeek(
+            api_key=settings.DEEPSEEK_API_KEY, 
+            model_name=settings.DEEPSEEK_MODEL, 
+            temperature=0.7, 
+            request_timeout=120,  # 增加超时时间到 120 秒
+            tags=["research_plan"]
+        )
     else:
         model = ChatOllama(model=settings.OLLAMA_AGENT_MODEL, base_url=settings.OLLAMA_BASE_URL, temperature=0.7, tags=["research_plan"])
     
@@ -475,7 +522,13 @@ async def check_hallucinations(
         dict[str, Router]: A dictionary containing the 'router' key with the classification result (classification type and logic).
     """
     if settings.AGENT_SERVICE == ServiceType.DEEPSEEK:
-        model = ChatDeepSeek(api_key=settings.DEEPSEEK_API_KEY, model_name=settings.DEEPSEEK_MODEL, temperature=0.7, tags=["hallucinations"])
+        model = ChatDeepSeek(
+            api_key=settings.DEEPSEEK_API_KEY, 
+            model_name=settings.DEEPSEEK_MODEL, 
+            temperature=0.7, 
+            request_timeout=120,  # 增加超时时间到 120 秒
+            tags=["hallucinations"]
+        )
     else:
         model = ChatOllama(model=settings.OLLAMA_AGENT_MODEL, base_url=settings.OLLAMA_BASE_URL, temperature=0.7, tags=["hallucinations"])
     
@@ -495,13 +548,34 @@ async def check_hallucinations(
     return {"hallucination": response} 
 
 
-# 定义持久化存储，也可以使用SQLiteSaver()、PostgresSaver()等
-# LangGraph官方地址：https://langchain-ai.github.io/langgraph/how-tos/persistence/
-checkpointer = MemorySaver()  #基于进程id的持久化存储，进程结束，数据丢失
+# 使用 Redis 进行状态持久化 (通过 .env 中的 REDIS_URL 配置)
+# 这里使用 AsyncRedisSaver 来适配异步 Web 环境
+from contextlib import asynccontextmanager
+
+# 正确创建 AsyncRedisSaver 实例
+@asynccontextmanager
+async def get_redis_checkpointer():
+    # AsyncRedisSaver.from_conn_string 返回一个异步上下文管理器
+    async with AsyncRedisSaver.from_conn_string(settings.REDIS_URL) as saver:
+        yield saver
+
+# 全局创建一个可用的 checkpointer 实例，默认为 MemorySaver 以防 Redis 连接失败
+checkpointer = MemorySaver()
+
+async def init_redis_checkpointer():
+    global checkpointer
+    try:
+        cp_gen = get_redis_checkpointer()
+        # 进入上下文并获取真正的 saver 实例
+        checkpointer = await cp_gen.__aenter__()
+        logger.info("Successfully initialized Redis checkpointer")
+    except Exception as e:
+        logger.error(f"Failed to initialize Redis checkpointer: {e}. Using MemorySaver instead.")
 
 # 定义状态图
 builder = StateGraph(AgentState, input=InputState)
 # 添加节点
+builder.add_node(manage_memory)
 builder.add_node(analyze_and_route_query)
 builder.add_node(respond_to_general_query)
 builder.add_node(get_additional_info)
@@ -510,7 +584,8 @@ builder.add_node(create_image_query)
 builder.add_node(create_file_query)
 
 # 添加边
-builder.add_edge(START, "analyze_and_route_query")
+builder.add_edge(START, "manage_memory")
+builder.add_edge("manage_memory", "analyze_and_route_query")
 builder.add_conditional_edges("analyze_and_route_query", route_query)
 
 

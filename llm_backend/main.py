@@ -31,9 +31,12 @@ from app.services.indexing_service import IndexingService
 import sys
 from app.lg_agent.lg_states import AgentState, InputState
 from app.lg_agent.utils import new_uuid
-from app.lg_agent.lg_builder import graph
+from app.lg_agent.lg_builder import builder, graph
+from langgraph.checkpoint.redis import AsyncRedisSaver
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command
 import json
+from fastapi import Request
 
 import mimetypes
 
@@ -115,12 +118,33 @@ async def rabbitmq_consumer():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 启动时创建一个异步任务运行消费者
+    # 1. 启动时创建一个异步任务运行消费者
     consumer_task = asyncio.create_task(rabbitmq_consumer())
     logger.info("已在独立协程中启动 RabbitMQ 消费者服务")
+
+    # 2. 初始化 LangGraph 的 Redis 持久化层
+    # 设计理念：在应用生命周期内保持 Redis 连接，并将其注入到 LangGraph 中
+    try:
+        from app.lg_agent.lg_builder import get_redis_checkpointer
+        cp_gen = get_redis_checkpointer()
+        # 进入上下文管理器获取 Redis Saver
+        saver = await cp_gen.__aenter__()
+        # 编译带持久化功能的图，并存储在 app.state 中
+        app.state.graph = builder.compile(checkpointer=saver)
+        app.state.saver_gen = cp_gen # 存储生成器以便正式关闭时 __aexit__
+        logger.info("LangGraph Redis 持久化层初始化成功")
+    except Exception as e:
+        logger.error(f"LangGraph Redis 持久化层初始化失败: {e}，将回退到内存模式。")
+        app.state.graph = builder.compile(checkpointer=MemorySaver())
+        app.state.saver_gen = None
+
     yield
-    # 关闭时取消任务
+    # 关闭时取消异步任务与连接
     consumer_task.cancel()
+    # 彻底关闭 Redis Saver 连接池
+    if hasattr(app.state, "saver_gen") and app.state.saver_gen:
+        await app.state.saver_gen.__aexit__(None, None, None)
+        
     try:
         await consumer_task
     except asyncio.CancelledError:
@@ -388,6 +412,7 @@ async def update_conversation_name(
 
 @app.post("/api/langgraph/query")
 async def langgraph_query(
+    request: Request,
     query: str = Form(...),
     user_id: int = Form(...),
     conversation_id: Optional[str] = Form(None),
@@ -417,12 +442,17 @@ async def langgraph_query(
             
             logger.info(f"Saved image {new_filename} for user {user_id}")
         
-        # 使用conversation_id作为thread_id，如果没有提供则创建新的
-        thread_id = conversation_id if conversation_id else new_uuid()
+        # 获取当前图谱实例
+        graph = request.app.state.graph
+        
+        # 优化：使用 user_id 构造 thread_id，实现跨进程/会话的用户历史记忆共享
+        # 存入 Redis 的 Key 将包含此 ID，确保多场景下能记住最近的五段（10条）对话
+        thread_id = f"user_{user_id}"
         thread_config = {
             "configurable": {
                 "thread_id": thread_id, 
                 "user_id": user_id,
+                "conversation_id": conversation_id, # 保留原始会话 ID 供参考
                 "image_path": str(image_path) if image_path else None
             }
         }
@@ -432,7 +462,7 @@ async def langgraph_query(
         try:
             # 检查是否有现有的会话状态
             if thread_id:
-                state_history = graph.get_state(thread_config)
+                state_history = await graph.aget_state(thread_config)
                 if state_history:
                     logger.info(f"Found existing conversation state for thread_id: {thread_id}")
         except Exception as e:
@@ -460,7 +490,7 @@ async def langgraph_query(
                         logger.debug(f"Tool call: {tool_data}")
                         
                 # 处理中断情况
-                state = graph.get_state(thread_config)
+                state = await graph.aget_state(thread_config)
                 if len(state) > 0 and len(state[-1]) > 0:
                     if len(state[-1][0].interrupts) > 0:
                         interrupt_json = json.dumps({"interruption": True, "conversation_id": thread_id})
@@ -489,7 +519,7 @@ async def langgraph_query(
                         logger.debug(f"Tool call: {tool_data}")
                         
                 # 处理中断情况
-                state = graph.get_state(thread_config)
+                state = await graph.aget_state(thread_config)
                 if len(state) > 0 and len(state[-1]) > 0:
                     if len(state[-1][0].interrupts) > 0:
                         interrupt_json = json.dumps({"interruption": True, "conversation_id": thread_id})
@@ -510,17 +540,25 @@ async def langgraph_query(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/langgraph/resume")
-async def langgraph_resume(request: LangGraphResumeRequest):
+async def langgraph_resume(request_body: LangGraphResumeRequest, request: Request):
     """继续执行LangGraph流程"""
+    graph = request.app.state.graph
     try:
-        logger.info(f"Resuming LangGraph query for user {request.user_id} with conversation {request.conversation_id}")
+        logger.info(f"Resuming LangGraph query for user {request_body.user_id} with conversation {request_body.conversation_id}")
         
-        # 使用会话ID作为线程ID
-        thread_config = {"configurable": {"thread_id": request.conversation_id}}
+        # 优化：统一使用 user_id 标识符作为线程 ID，确保记忆在恢复流程中也能一致
+        thread_id = f"user_{request_body.user_id}"
+        thread_config = {
+            "configurable": {
+                "thread_id": thread_id,
+                "user_id": request_body.user_id,
+                "conversation_id": request_body.conversation_id
+            }
+        }
         
         # 流式处理恢复
         async def process_resume():
-            async for c, metadata in graph.astream(Command(resume=request.query), stream_mode="messages", config=thread_config):
+            async for c, metadata in graph.astream(Command(resume=request_body.query), stream_mode="messages", config=thread_config):
                 # 只处理最终展示给用户的内容
                 if c.content and not c.additional_kwargs.get("tool_calls"):
                     # 同样使用json.dumps处理内容
