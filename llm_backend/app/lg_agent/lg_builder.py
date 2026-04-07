@@ -90,7 +90,7 @@ async def analyze_and_route_query(
     )
     logger.info(f"Analyze user query type completed, result: {response}")
     return {"router": response}
-
+#只是路由函数
 def route_query(
     state: AgentState,
 ) -> Literal["respond_to_general_query", "get_additional_info", "create_research_plan", "create_image_query", "create_file_query"]:
@@ -178,7 +178,7 @@ async def get_additional_info(
 
     # 首先连接 Neo4j 图数据库
     try:
-        neo4j_graph = get_neo4j_graph()
+        neo4j_graph = get_neo4j_graph()  #neo4j实例
         logger.info("success to get Neo4j graph database connection")
     except Exception as e:
         logger.error(f"failed to get Neo4j graph database connection: {e}")
@@ -204,7 +204,7 @@ async def get_additional_info(
 
     # 动态从 Neo4j 图表中获取图表结构
     graph_context = (
-        f"\n参考图表结构来回答:\n{retrieve_and_parse_schema_from_graph_for_prompts(neo4j_graph)}"
+        f"\n参考图表结构来回答:\n{retrieve_and_parse_schema_from_graph_for_prompts(neo4j_graph)}"  #它返回的是一张 数据库全景图
         if neo4j_graph is not None
         else ""
     )
@@ -497,7 +497,7 @@ async def check_hallucinations(
 
 # 定义持久化存储，也可以使用SQLiteSaver()、PostgresSaver()等
 # LangGraph官方地址：https://langchain-ai.github.io/langgraph/how-tos/persistence/
-checkpointer = MemorySaver()
+checkpointer = MemorySaver()  #基于进程id的持久化存储，进程结束，数据丢失
 
 # 定义状态图
 builder = StateGraph(AgentState, input=InputState)

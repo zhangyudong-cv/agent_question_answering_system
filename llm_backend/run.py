@@ -1,3 +1,10 @@
+# ===================== 自动加载 .env 全局生效 =====================
+# 这两行必须放在最顶部！！！
+from dotenv import load_dotenv
+from pathlib import Path
+load_dotenv(Path(__file__).parent / ".env")  # 自动加载同级 .env
+# =================================================================
+
 import uvicorn
 from app.core.logger import get_logger
 import os

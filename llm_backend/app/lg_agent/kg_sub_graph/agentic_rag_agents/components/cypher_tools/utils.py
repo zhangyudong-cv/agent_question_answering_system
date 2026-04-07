@@ -103,7 +103,8 @@ def validate_cypher_query_syntax(graph: Neo4jGraph, cypher_statement: str) -> Li
         # 使用 EXPLAIN 查询来验证Cypher语句的语法，仅仅查看语法是否正确，而不实际执行查询
         graph.query(f"EXPLAIN {cypher_statement}")
     except CypherSyntaxError as e:
-        errors.append(str(e.message))
+        # 记录完整的错误消息，包括位置信息，以便大语言模型能准确定位并修复
+        errors.append(str(e))
     return errors
 
 
@@ -486,7 +487,7 @@ def create_text2cypher_validation_node(
         # Map 会表明你的Cypher查询语法是正确的，但查询中使用的具体值在数据库中不存在。这是数据不存在的问题，而不是查询语法的问题。
         if errors:  # 真正的语法错误
             correct_cypher_chain = correction_cypher_prompt | llm | StrOutputParser()
-            corrected_cypher_update = correct_cypher_chain.ainvoke(
+            corrected_cypher_update = await correct_cypher_chain.ainvoke(
                 {
                     "question": state.get("task"),
                     "errors": errors, 

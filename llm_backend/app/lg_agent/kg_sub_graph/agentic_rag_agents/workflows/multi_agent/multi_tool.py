@@ -53,7 +53,7 @@ class AgentState(InputState):
     question: str = field(default_factory=str) # 这个参数用来与子图进行交互
     answer: str = field(default_factory=str)  # 这个参数用来与子图进行交互
 
-
+#
 def create_multi_tool_workflow(
     llm: BaseChatModel,
     graph: Neo4jGraph,
@@ -105,32 +105,32 @@ def create_multi_tool_workflow(
     # Guardrails 节点决定传入的问题是否在检索的范围内（比如是否和电商（自家的产品相关））。如果不在，则提供默认消息，并且工作流路由到最终的答案生成。
     guardrails = create_guardrails_node(
         llm=llm, graph=graph, scope_description=scope_description
-    )
+    )  #它会返回一个函数，这个函数会根据用户的问题判断是否在检索的范围内
 
     # 2. 如果通过guardrails，则会针对用户的问题进行任务分解
-    planner = create_planner_node(llm=llm)
+    planner = create_planner_node(llm=llm)  #它会返回一个函数，这个函数会根据用户的问题进行任务分解
 
     # 3. 创建cypher_query节点，用来根据用户的问题生成Cypher查询语句
-    cypher_query = create_cypher_query_node()
+    cypher_query = create_cypher_query_node()  #它会返回一个函数，这个函数会根据用户的问题生成Cypher查询语句
 
     predefined_cypher = create_predefined_cypher_node(
         graph=graph, predefined_cypher_dict=predefined_cypher_dict
-    )
+    )     #它会返回一个函数，这个函数会根据用户的问题生成Cypher查询语句
 
-    customer_tools = create_graphrag_query_node()
+    customer_tools = create_graphrag_query_node()  #它会返回一个函数，这个函数会根据用户的问题生成Cypher查询语句
 
     # 工具选择节点，根据用户的问题选择合适的工具
     tool_selection = create_tool_selection_node(
         llm=llm,
         tool_schemas=tool_schemas,
         default_to_text2cypher=default_to_text2cypher,
-    )
-    summarize = create_summarization_node(llm=llm)
+    )  #它会返回一个函数，这个函数会根据用户的问题选择合适的工具
+    summarize = create_summarization_node(llm=llm)  #它会返回一个函数，这个函数会根据用户的问题生成Cypher查询语句
 
-    final_answer = create_final_answer_node()
+    final_answer = create_final_answer_node()  #它会返回一个函数，这个函数会根据用户的问题生成Cypher查询语句
 
     # 创建状态图
-    main_graph_builder = StateGraph(OverallState, input=InputState, output=OutputState)
+    main_graph_builder = StateGraph(OverallState, input=InputState, output=OutputState)  #它会返回一个函数，这个函数会根据用户的问题生成Cypher查询语句
 
     main_graph_builder.add_node(guardrails)
     main_graph_builder.add_node(planner)
@@ -150,7 +150,7 @@ def create_multi_tool_workflow(
     )
     main_graph_builder.add_conditional_edges(
         "planner",
-        map_reduce_planner_to_tool_selection,  # type: ignore[arg-type, unused-ignore]
+        map_reduce_planner_to_tool_selection,  # type: ignore[arg-type, unused-ignore]  Map-Reduce机制
         ["tool_selection"],
     )
 
@@ -163,3 +163,34 @@ def create_multi_tool_workflow(
 
     return main_graph_builder.compile()
 
+
+#tool_selection：
+# 1. cypher_query (动态生成路径)
+# 它是通过类的 Docstring 来告诉大模型什么时候该选它：
+
+# python
+# class cypher_query(BaseModel):
+#     """如果用户问的是关于产品价格、库存、规格等，则使用这个工具，生成Cypher查询语句进行查询"""
+#     task: str = Field(..., description="The task the Cypher query must answer.")
+# 2. predefined_cypher (快车道路径)
+# 这个工具拥有最详细的描述，枚举了所有支持的查询场景（如产品查询、订单查询、智能家居查询等），大模型会通过这段长文本判断问题是否匹配其中的某个模板：
+
+# python
+# class predefined_cypher(BaseModel):
+#     """这个工具包含预定义的Cypher查询语句，用于快速响应各种电商场景的查询需求。
+    
+#     根据用户问题的类型，可以选择以下类别的查询：
+#     1. 产品类查询：...
+#     2. 客户类查询：...
+#     ...
+#     9. 智能家居相关查询：...
+#     """
+#     query: str = Field(..., description="query the graph must include the question")
+#     parameters: dict = Field(..., description="parameters for the query to Neo4j")
+# 3. microsoft_graphrag_query (对应代码中的 customer_tools)
+# 在 node.py 的逻辑里，除了前两个特定的工具，其他的都会被路由到 customer_tools。它的描述如下：
+
+# python
+# class microsoft_graphrag_query(BaseModel):
+#     """如果用户问的问题是关于产品的故障、售后、保修、维修、退换货以及评价等，则使用这个工具"""
+#     query: str = Field(..., description="query the graph must include the question")

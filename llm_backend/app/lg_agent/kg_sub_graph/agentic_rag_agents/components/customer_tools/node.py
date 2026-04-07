@@ -17,7 +17,8 @@ from app.core.config import settings
 # 定义GraphRAG查询的输入状态类型
 class GraphRAGQueryInputState(BaseModel):
     task: str
-    query: str
+    query_name: str
+    query_parameters: Dict[str, Any]
     steps: List[str]
 
 # 定义GraphRAG查询的输出状态类型
@@ -195,8 +196,10 @@ def create_graphrag_query_node(
         errors = list()
         search_result = {}
         
-        # 获取查询文本
-        query = state.get("task", "")
+        # 获取查询文本：优先使用大模型提取并生成的 tool_args (在 query_parameters 中)
+        query_params = state.get("query_parameters", {})
+        query = query_params.get("query", state.get("task", ""))
+        
         if not query:
             errors.append("未提供查询文本")
         else:

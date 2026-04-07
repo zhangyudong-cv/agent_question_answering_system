@@ -52,8 +52,16 @@ def prepare_product_nodes(data_dir, output_dir):
     try:
         df = pd.read_csv(file_path)
         
-        # 重命名ID列
+        # 先存储原始 ID 列的唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃-----
+        # 关键：不能用自赋値 df['X']=df['X'] 来备份，Pandas 在 rename 后会丢失该列。
+        # 正确做法：先把唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃唃
+        product_id_values = df['ProductID'].values
+        
+        # 重命名ID列为 Neo4j Admin 导入格式的主键标识
         df = df.rename(columns={'ProductID': 'productId:ID(Product)'})
+        
+        # rename 完成后再写回同名普通属性列，使 Cypher WHERE p.ProductID = x 可正常执行
+        df['ProductID'] = product_id_values
         
         # 添加标签列
         df['labels:LABEL'] = 'Product'
@@ -75,8 +83,14 @@ def prepare_category_nodes(data_dir, output_dir):
     try:
         df = pd.read_csv(file_path)
         
-        # 重命名ID列
+        # 先把原始 CategoryID 列值存入临时变量
+        category_id_values = df['CategoryID'].values
+        
+        # 重命名ID列为 Neo4j Admin 导入格式的主键标识
         df = df.rename(columns={'CategoryID': 'categoryId:ID(Category)'})
+        
+        # rename 完成后再写回同名普通属性列，使 Cypher WHERE c.CategoryID = x 可正常执行
+        df['CategoryID'] = category_id_values
         
         # 添加标签列
         df['labels:LABEL'] = 'Category'
@@ -98,8 +112,14 @@ def prepare_supplier_nodes(data_dir, output_dir):
     try:
         df = pd.read_csv(file_path)
         
-        # 重命名ID列
+        # 先把原始 SupplierID 列值存入临时变量
+        supplier_id_values = df['SupplierID'].values
+        
+        # 重命名ID列为 Neo4j Admin 导入格式的主键标识
         df = df.rename(columns={'SupplierID': 'supplierId:ID(Supplier)'})
+        
+        # rename 完成后再写回同名普通属性列，使 Cypher WHERE s.SupplierID = x 可正常执行
+        df['SupplierID'] = supplier_id_values
         
         # 添加标签列
         df['labels:LABEL'] = 'Supplier'
@@ -121,8 +141,14 @@ def prepare_customer_nodes(data_dir, output_dir):
     try:
         df = pd.read_csv(file_path)
         
-        # 重命名ID列
+        # 先把原始 CustomerID 列值存入临时变量
+        customer_id_values = df['CustomerID'].values
+        
+        # 重命名ID列为 Neo4j Admin 导入格式的主键标识
         df = df.rename(columns={'CustomerID': 'customerId:ID(Customer)'})
+        
+        # rename 完成后再写回同名普通属性列，使 Cypher WHERE c.CustomerID = 'AB123' 可正常执行
+        df['CustomerID'] = customer_id_values
         
         # 添加标签列
         df['labels:LABEL'] = 'Customer'
@@ -144,8 +170,14 @@ def prepare_employee_nodes(data_dir, output_dir):
     try:
         df = pd.read_csv(file_path)
         
-        # 重命名ID列
+        # 先把原始 EmployeeID 列值存入临时变量
+        employee_id_values = df['EmployeeID'].values
+        
+        # 重命名ID列为 Neo4j Admin 导入格式的主键标识
         df = df.rename(columns={'EmployeeID': 'employeeId:ID(Employee)'})
+        
+        # rename 完成后再写回同名普通属性列，使 Cypher WHERE e.EmployeeID = x 可正常执行
+        df['EmployeeID'] = employee_id_values
         
         # 添加标签列
         df['labels:LABEL'] = 'Employee'
@@ -167,8 +199,14 @@ def prepare_shipper_nodes(data_dir, output_dir):
     try:
         df = pd.read_csv(file_path)
         
-        # 重命名ID列
+        # 先把原始 ShipperID 列值存入临时变量
+        shipper_id_values = df['ShipperID'].values
+        
+        # 重命名ID列为 Neo4j Admin 导入格式的主键标识
         df = df.rename(columns={'ShipperID': 'shipperId:ID(Shipper)'})
+        
+        # rename 完成后再写回同名普通属性列，使 Cypher WHERE s.ShipperID = x 可正常执行
+        df['ShipperID'] = shipper_id_values
         
         # 添加标签列
         df['labels:LABEL'] = 'Shipper'
@@ -190,19 +228,24 @@ def prepare_order_nodes(data_dir, output_dir):
     try:
         df = pd.read_csv(file_path)
         
-        # 重命名ID列
+        # 关键修复：先把原始 OrderID 列值存入临时变量
+        # rename 之后 'OrderID' 成为 Neo4j 内部主键标识（:ID列），不再作为普通属性存储
+        order_id_values = df['OrderID'].values
+        
+        # 重命名ID列为 Neo4j Admin 导入格式的主键标识
         df = df.rename(columns={'OrderID': 'orderId:ID(Order)'})
+        
+        # rename 完成后再写回同名普通属性列，使 Cypher WHERE o.OrderID = 1001 可正常执行
+        df['OrderID'] = order_id_values
         
         # 添加标签列
         df['labels:LABEL'] = 'Order'
         
-        # 移除关系列，这些将在边文件中使用
-        if 'CustomerID' in df.columns:
-            df = df.drop(columns=['CustomerID'])
-        if 'EmployeeID' in df.columns:
-            df = df.drop(columns=['EmployeeID'])
-        if 'ShipVia' in df.columns:
-            df = df.drop(columns=['ShipVia'])
+        # 移除外键关系列（这些数据已通过边文件建立关系，节点本身不需要保留）
+        cols_to_drop = ['CustomerID', 'EmployeeID', 'ShipVia',
+                        # 移除 SQL JOIN 带入的冗余字段，这些信息应通过图关系访问，而非直接存在节点上
+                        'CustomerName', 'LastName', 'FirstName', 'ShipperName']
+        df = df.drop(columns=[c for c in cols_to_drop if c in df.columns])
         
         # 保存为Neo4j Admin导入格式
         output_file = os.path.join(output_dir, 'order_nodes.csv')
@@ -221,17 +264,22 @@ def prepare_review_nodes(data_dir, output_dir):
     try:
         df = pd.read_csv(file_path)
         
-        # 重命名ID列
+        # 先把原始 ReviewID 列值存入临时变量
+        review_id_values = df['ReviewID'].values
+        
+        # 重命名ID列为 Neo4j Admin 导入格式的主键标识
         df = df.rename(columns={'ReviewID': 'reviewId:ID(Review)'})
+        
+        # rename 完成后再写回同名普通属性列，使 Cypher WHERE r.ReviewID = x 可正常执行
+        df['ReviewID'] = review_id_values
         
         # 添加标签列
         df['labels:LABEL'] = 'Review'
         
-        # 移除关系列，这些将在边文件中使用
-        if 'ProductID' in df.columns:
-            df = df.drop(columns=['ProductID'])
-        if 'CustomerID' in df.columns:
-            df = df.drop(columns=['CustomerID'])
+        # 移除外键关系列（已在边文件中建立 WROTE/ABOUT 关系）
+        # 同时移除 SQL JOIN 带入的冗余字段（ProductName/CustomerName/CategoryName 应通过关系遍历获取）
+        cols_to_drop = ['ProductID', 'CustomerID', 'ProductName', 'CustomerName', 'CategoryName']
+        df = df.drop(columns=[c for c in cols_to_drop if c in df.columns])
         
         # 保存为Neo4j Admin导入格式
         output_file = os.path.join(output_dir, 'review_nodes.csv')
@@ -421,6 +469,14 @@ def prepare_employee_reports_to_edges(data_dir, output_dir):
         # 过滤掉ReportsTo为空的行
         df = df.dropna(subset=['ReportsTo'])
         
+        # 关键修复：ReportsTo 列因含有 NaN 行，pandas 会将其自动升格为 float64。
+        # dropna 后数值虽已有效，但仍以 "1.0" 而非 "1" 形式写入 CSV，导致
+        # neo4j-admin import 无法将浮点型 END_ID 与整数型节点主键匹配，
+        # 配合 --skip-bad-relationships=true 时静默丢弃所有 REPORTS_TO 关系。
+        # 强制转为 int64 即可修复。
+        df = df.copy()  # 避免 SettingWithCopyWarning
+        df['ReportsTo'] = df['ReportsTo'].astype(int)
+        
         # 创建边数据框
         edges_df = pd.DataFrame({
             ':START_ID(Employee)': df['EmployeeID'],
@@ -508,5 +564,10 @@ def generate_import_command(output_dir):
     print(f"Neo4j Admin导入命令(适用于Neo4j 2025.02.0及更高版本)已保存: {command_path}")
 
 if __name__ == "__main__":
-    # 如果直接运行此脚本，处理默认路径的文件
-    prepare_neo4j_admin_import()
+    # 获取脚本所在的绝对路径作为基准，避免因执行目录不同导致找不到文件
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    data_dir = os.path.join(script_dir, 'exported_data')
+    output_dir = os.path.join(script_dir, 'data', 'neo4j_admin')
+    
+    # 使用绝对路径执行处理
+    prepare_neo4j_admin_import(data_dir=data_dir, output_dir=output_dir)

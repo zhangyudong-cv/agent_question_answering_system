@@ -66,7 +66,7 @@ DEEPSEEK_MODEL=deepseek-chat
 # 进入后端目录
 cd llm_backend
 
-# 启动服务（默认端口 9000）
+# 启动服务（默认端口 8000）
 python run.py
 
 # 如果需要修改 IP 和端口，编辑 run.py 中的配置：

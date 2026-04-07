@@ -29,6 +29,8 @@ def create_text2cypher_generation_prompt_template() -> ChatPromptTemplate:
                 (
                     """你是一位Neo4j专家。根据输入的问题，创建一个语法正确的Cypher查询语句。
                         不要在响应中包含任何反引号或其他标记。只使用MATCH或WITH子句开始查询。只返回Cypher语句！
+                        并且遵循以下准则和提示：- **姓名匹配准则**：**必须**使用 `WHERE (e.FirstName + e.LastName) CONTAINS '姓名' OR (e.LastName + e.FirstName) CONTAINS '姓名'` 这种拼接方式。严禁分开匹配 FirstName 和 LastName，因为这会导致中英文姓名匹配失败。
+                                              - **WITH 作用域准则**：在 `WITH` 子句进行聚合（如 `COUNT(x)`）后，原始变量 `x` 将进入不可见状态。如果后续子句仍需使用 `x` 的属性，必须在 `WITH` 中使用 `COLLECT(x)` 或透传其具体属性。
 
                         以下是数据库模式信息：
                         {schema}
@@ -60,7 +62,7 @@ def create_text2cypher_validation_prompt_template() -> ChatPromptTemplate:
 
     validate_cypher_user = """你必须检查以下内容：
     * Cypher语句中是否有任何语法错误？
-    * Cypher语句中是否有任何缺失或未定义的变量？
+    * Cypher语句中是否有任何缺失或未定义的变量？（特别检查 `WITH` 聚合后是否丢失了后续需要的原始变量）
     * Cypher语句是否包含足够的信息来回答问题？
     * 确保所有节点、关系和属性都存在于提供的模式中。
 

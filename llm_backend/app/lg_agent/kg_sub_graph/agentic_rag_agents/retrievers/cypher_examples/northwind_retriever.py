@@ -142,6 +142,15 @@ class NorthwindCypherRetriever(BaseCypherExampleRetriever):
             ],
             "复杂查询": [
                 {
+                    "question": "查询处理订单最多的前5名员工，并列出这些订单的收货地址",
+                    "cypher": """MATCH (e:Employee)-[:PROCESSED]->(o:Order)
+    WHERE (e.FirstName + e.LastName) CONTAINS '某人' OR (e.LastName + e.FirstName) CONTAINS '某人'
+    WITH e, COUNT(o) AS orderCount, COLLECT(DISTINCT o.ShipAddress) AS shipAddresses
+    ORDER BY orderCount DESC
+    LIMIT 5
+    RETURN e.FirstName + ' ' + e.LastName AS EmployeeName, orderCount, shipAddresses"""
+                },
+                {
                     "question": "销售最多的智能家居产品是什么？",
                     "cypher": """MATCH (o:Order)-[rel:CONTAINS]->(p:Product)
     WITH p.ProductName AS product, SUM(rel.Quantity) AS total_quantity

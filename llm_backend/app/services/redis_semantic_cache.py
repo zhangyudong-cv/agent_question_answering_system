@@ -35,29 +35,40 @@ class RedisSemanticCache:
         # 启动自动清理任务
         asyncio.create_task(self._auto_cleanup())
         
-    async def _get_ollama_embedding(self, text: str) -> List[float]:
-        """使用Ollama生成文本向量"""
+    async def _get_dashscope_embedding(self, text: str) -> List[float]:
+        """使用阿里云百炼生成文本向量"""
         try:
             async with aiohttp.ClientSession() as session:
+                # 直接在代码中强行配置百炼的参数
+                api_key = "sk-9726d3bd14e94d5398c1677e00625ae6"
+                base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+                headers = {
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json"
+                }
                 async with session.post(
-                    f"{settings.OLLAMA_BASE_URL}/api/embed",
+                    f"{base_url}/embeddings",
+                    headers=headers,
                     json={
-                        "model": self.model_name,
-                        "input": text  # 使用 input 而不是 prompt
+                        "model": "text-embedding-v3",
+                        "input": text
                     }
                 ) as response:
                     result = await response.json()
-                    # Ollama embed API 返回格式为 {"embeddings": [[...], ...]}
-                    return result["embeddings"][0]  # 返回第一个向量
+                    # OpenAI兼容接口返回格式为 {"data": [{"embedding": [...], ...}]}
+                    if "data" not in result or not result["data"]:
+                        logger.error(f"DashScope API Error: {result}")
+                        raise ValueError(f"API Error: {result}")
+                    return result["data"][0]["embedding"]
         except Exception as e:
-            logger.error(f"Error getting Ollama embedding: {str(e)}", exc_info=True)
+            logger.error(f"Error getting DashScope embedding: {str(e)}", exc_info=True)
             raise
 
     async def _get_embedding(self, text: str) -> List[float]:
         """获取文本向量"""
         try:
-            # 直接使用 ollama 的 embedding 接口
-            embedding = await self._get_ollama_embedding(text)
+            # 切换为使用阿里云百炼的 embedding 接口
+            embedding = await self._get_dashscope_embedding(text)
             if not embedding:
                 raise ValueError("Failed to get embedding")
             return embedding

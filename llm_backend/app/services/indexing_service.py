@@ -24,6 +24,8 @@ class IndexingService:
         self.data_dir_name = settings.GRAPHRAG_DATA_DIR
         self.data_dir = os.path.join(self.project_dir, self.data_dir_name)
         
+        # 配置文件映射 (mime_type -> config_file_name)
+        self.config_mapping = {}
 
         # 默认配置文件
         self.default_config = 'settings.yaml'
@@ -44,19 +46,15 @@ class IndexingService:
         return os.path.exists(index_path)
     
     def _prepare_user_directories(self, user_id: int) -> tuple:
-        """为用户准备输入和输出目录"""
-        # 生成用户UUID
-        user_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"user_{user_id}"))
+        """为用户准备目录。由于取消了隔离，直接返回根目录。"""
+        # 直接指向根目录下的 input 和 output
+        input_dir = os.path.join(self.data_dir, "input")
+        os.makedirs(input_dir, exist_ok=True)
         
-        # 创建用户输入目录
-        user_input_dir = os.path.join(self.data_dir, "input", user_uuid)
-        os.makedirs(user_input_dir, exist_ok=True)
+        output_dir = os.path.join(self.data_dir, "output")
+        os.makedirs(output_dir, exist_ok=True)
         
-        # 创建用户输出目录
-        user_output_dir = os.path.join(self.data_dir, "output", user_uuid)
-        os.makedirs(user_output_dir, exist_ok=True)
-        
-        return user_input_dir, user_output_dir
+        return input_dir, output_dir
     
     def _copy_file_to_input_dir(self, file_path: str, input_dir: str) -> str:
         """将文件复制到用户的输入目录"""
@@ -120,13 +118,18 @@ class IndexingService:
             logger.info(f"输出目录: {user_output_dir}")
             
             # 执行索引构建
-            index_result = await api.build_index(
-                config=graphrag_config,
-                method=IndexingMethod.Standard,
-                is_update_run=is_update,
-                memory_profile=False,
-                progress_logger=progress_logger
-            )
+            try:
+                index_result = await api.build_index(
+                    config=graphrag_config,
+                    method=IndexingMethod.Standard,
+                    is_update_run=is_update,
+                    memory_profile=False,
+                    progress_logger=progress_logger
+                )
+            finally:
+                # ！！！重要：这是解决你之前反馈的“任务不结束”现象的关键代码
+                # 只有停止了 live 渲染，终端才会释放并返回到正常状态
+                progress_logger.stop()
             
             # 处理结果
             result_info = {
@@ -151,7 +154,7 @@ class IndexingService:
             return result_info
             
         except Exception as e:
-            logger.error(f"处理文件时发生错误: {str(e)}", exc_info=True)
+            logger.exception("处理文件时发生错误: {}", str(e))
             return {
                 'file_path': file_path,
                 'status': 'error',

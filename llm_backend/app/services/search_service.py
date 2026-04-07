@@ -35,7 +35,7 @@ class SearchService:
         self.tools_description = self._generate_tools_description()
 
     def _generate_tools_description(self) -> str:
-        """根据工具定义生成工具描述提示"""
+        """根据工具定义生成工具描述提示""" #生成工具描述提示
         tool_descriptions = []
         
         for tool_def in self.tool_registry.get_tools_definition():

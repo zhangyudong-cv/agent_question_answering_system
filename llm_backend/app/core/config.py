@@ -75,6 +75,13 @@ class Settings(BaseSettings):
     GRAPHRAG_COMMUNITY_LEVEL: int = 3                       # 社区级别
     GRAPHRAG_DYNAMIC_COMMUNITY: bool = False                # 是否动态选择社区
     
+    # RabbitMQ settings
+    RABBITMQ_USER: str = "itheima"
+    RABBITMQ_PASS: str = "123321"
+    RABBITMQ_HOST: str = "192.168.100.128"
+    RABBITMQ_PORT: int = 5672
+    RABBITMQ_VHOST: str = "/"
+    
     @property
     def DATABASE_URL(self) -> str:
         return f"mysql+aiomysql://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
@@ -90,9 +97,15 @@ class Settings(BaseSettings):
         """构建Neo4j连接URL"""
         return f"{self.NEO4J_URL}"
     
+    @property
+    def RABBITMQ_URL(self) -> str:
+        """构建RabbitMQ连接URL"""
+        return f"amqp://{self.RABBITMQ_USER}:{self.RABBITMQ_PASS}@{self.RABBITMQ_HOST}:{self.RABBITMQ_PORT}/{self.RABBITMQ_VHOST}"
+    
     class Config:
         env_file = str(ENV_FILE)  # 使用绝对路径
         env_file_encoding = "utf-8"
         case_sensitive = True
+        extra = "ignore"
 
 settings = Settings() 

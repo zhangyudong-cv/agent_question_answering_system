@@ -2,10 +2,10 @@ from typing import Dict
 
 predefined_cypher_dict: Dict[str, str] = {
     # 产品类查询
-    "product_by_name": "MATCH (p:Product) WHERE p.ProductName CONTAINS $product_name RETURN p.ProductName, p.UnitPrice, p.UnitsInStock, p.CategoryName",
+    "product_by_name": "MATCH (p:Product) WHERE replace(p.ProductName, ' ', '') CONTAINS replace($product_name, ' ', '') RETURN p.ProductName, p.UnitPrice, p.UnitsInStock, p.CategoryName",
     "product_by_category": "MATCH (p:Product)-[:BELONGS_TO]->(c:Category) WHERE c.CategoryName = $category_name RETURN p.ProductName, p.UnitPrice, p.UnitsInStock",
     "product_by_supplier": "MATCH (p:Product)-[:SUPPLIED_BY]->(s:Supplier) WHERE s.CompanyName = $supplier_name RETURN p.ProductName, p.UnitPrice, p.UnitsInStock",
-    "products_low_stock": "MATCH (p:Product) WHERE toInteger(p.UnitsInStock) < 10 RETURN p.ProductName, p.UnitsInStock, p.CategoryName ORDER BY toInteger(p.UnitsInStock)",
+    "products_low_stock": "MATCH (p:Product) WHERE toInteger(p.UnitsInStock) < toInteger($threshold) RETURN p.ProductName, p.UnitsInStock, p.CategoryName ORDER BY toInteger(p.UnitsInStock)",
     "products_popular": "MATCH (p:Product)<-[:ABOUT]-(r:Review) RETURN p.ProductName, count(r) as ReviewCount, avg(toFloat(r.Rating)) as AvgRating ORDER BY ReviewCount DESC LIMIT 10",
     
     # 客户类查询
@@ -29,8 +29,8 @@ predefined_cypher_dict: Dict[str, str] = {
     "category_product_count": "MATCH (c:Category)<-[:BELONGS_TO]-(p:Product) RETURN c.CategoryName, count(p) as ProductCount ORDER BY ProductCount DESC",
     
     # 员工类查询
-    "employee_by_name": "MATCH (e:Employee) WHERE e.FirstName + ' ' + e.LastName CONTAINS $employee_name RETURN e.FirstName, e.LastName, e.Title, e.HireDate",
-    "employee_processed_orders": "MATCH (e:Employee)-[:PROCESSED]->(o:Order) WHERE e.FirstName + ' ' + e.LastName = $employee_name RETURN o.orderId, o.OrderDate, o.CustomerName",
+    "employee_by_name": "MATCH (e:Employee) WHERE e.LastName + e.FirstName CONTAINS $employee_name OR e.FirstName + e.LastName CONTAINS $employee_name OR e.FirstName CONTAINS $employee_name OR e.LastName CONTAINS $employee_name RETURN e.FirstName, e.LastName, e.Title, e.HireDate",
+    "employee_processed_orders": "MATCH (e:Employee)-[:PROCESSED]->(o:Order) WHERE e.LastName + e.FirstName CONTAINS $employee_name OR e.FirstName + e.LastName CONTAINS $employee_name OR e.FirstName CONTAINS $employee_name OR e.LastName CONTAINS $employee_name RETURN e.FirstName + e.LastName AS EmployeeName, o.orderId, o.OrderDate, o.ShipName AS CustomerCompanyName ORDER BY o.OrderDate DESC",
     
     # 评论类查询
     "product_reviews": "MATCH (p:Product)<-[:ABOUT]-(r:Review) WHERE p.ProductName = $product_name RETURN r.CustomerName, r.Rating, r.ReviewText, r.ReviewDate ORDER BY r.ReviewDate DESC",

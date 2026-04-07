@@ -67,6 +67,8 @@ chunks:
 embed_text:
   model_id: default_embedding_model
   vector_store_id: default_vector_store
+  batch_size: 10
+  batch_max_tokens: 8192
 
 ### Output settings ###
 ## If blob storage is specified in the following four sections,

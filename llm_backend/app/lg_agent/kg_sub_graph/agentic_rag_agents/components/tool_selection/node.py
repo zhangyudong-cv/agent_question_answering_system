@@ -119,13 +119,20 @@ def create_tool_selection_node(
                     )
                 )
 
-
-           
-                
+        # 兜底：LLM 没有返回任何工具调用时的处理
         elif default_to_text2cypher:
-            return go_to_text2cypher
+            # 默认 fallback 到动态 Cypher 生成节点
+            return Command(
+                goto=Send(
+                    "cypher_query",
+                    {
+                        "task": state.get("question", ""),
+                        "steps": ["tool_selection"],
+                    },
+                )
+            )
 
-        # handle instance where no tool is chosen
+        # 彻底无法选择工具时，进入错误处理节点
         else:
             return Command(
                 goto=Send(
@@ -139,7 +146,5 @@ def create_tool_selection_node(
                     },
                 )
             )
-
-        return go_to_text2cypher
 
     return tool_selection

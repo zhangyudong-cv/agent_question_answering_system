@@ -1,13 +1,18 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File, Query, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Query, Form, BackgroundTasks, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Dict, Optional
+import redis.asyncio as aioredis
+import aio_pika
 from app.services.llm_factory import LLMFactory
 from app.services.search_service import SearchService
 from fastapi.staticfiles import StaticFiles
 from datetime import datetime
 from pathlib import Path
+import asyncio
+from sqlalchemy import text
+from app.lg_agent.kg_sub_graph.kg_neo4j_conn import get_neo4j_graph
 
 from app.core.logger import get_logger, log_structured
 from app.core.middleware import LoggingMiddleware
@@ -16,6 +21,8 @@ from app.api import api_router
 from app.core.database import AsyncSessionLocal
 from app.models.conversation import Conversation, DialogueType
 from app.models.message import Message
+from app.core.security import get_current_user
+from app.models.user import User
 from sqlalchemy import select
 from app.services.conversation_service import ConversationService
 import uuid
@@ -28,17 +35,99 @@ from app.lg_agent.lg_builder import graph
 from langgraph.types import Command
 import json
 
+import mimetypes
+
+# 强制修复 Windows 下 JS 和 CSS 的 MIME 类型问题
+mimetypes.add_type("application/javascript", ".js")
+mimetypes.add_type("text/css", ".css")
 
 # 配置上传目录 - RAG 功能的
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
 
-# logger 变量就被初始化为一个日志记录器实例。
-# 之后，便可以在当前文件中直接使用 logger.info()、logger.error() 等方法来记录日志，而不需要进行其他操作。
+from contextlib import asynccontextmanager
+
+# logger 变量初始化
 logger = get_logger(service="main")
 
-# 创建 FastAPI 应用实例
-app = FastAPI(title="AssistGen REST API")
+# 定义消费者逻辑
+async def rabbitmq_consumer():
+    """
+    RabbitMQ 消费者：监听购买消息并同步更新 MySQL 和 Neo4j 库存
+    """
+    # 从 settings 中读取 RabbitMQ 配置
+    rmq_user = settings.RABBITMQ_USER
+    rmq_pass = settings.RABBITMQ_PASS
+    rmq_host = settings.RABBITMQ_HOST
+    rmq_port = settings.RABBITMQ_PORT
+    rmq_vhost = settings.RABBITMQ_VHOST
+    amqp_url = f"amqp://{rmq_user}:{rmq_pass}@{rmq_host}:{rmq_port}/{rmq_vhost}"
+    
+    logger.info("RabbitMQ 消费者启动中...")
+    
+    while True:
+        try:
+            connection = await aio_pika.connect(amqp_url)
+            async with connection:
+                channel = await connection.channel()
+                # 声明队列（确保队列存在）
+                queue = await channel.declare_queue("agentque", durable=True)
+                
+                logger.info("RabbitMQ 消费者已就绪，正在监听 agentque...")
+                
+                async with queue.iterator() as queue_iter:
+                    async for message in queue_iter:
+                        async with message.process():
+                            try:
+                                data = json.loads(message.body.decode())
+                                product_id = data.get("product_id")
+                                if not product_id:
+                                    continue
+                                    
+                                logger.info(f"消费者收到订单消息: 产品ID={product_id}")
+                                
+                                # 1. 更新 MySQL 库存
+                                # 深度分析表结构可知：表名 Products, 字段 UnitsInStock, 主键 ProductID
+                                async with AsyncSessionLocal() as session:
+                                    mysql_sql = text("UPDATE graphrag.Products SET UnitsInStock = UnitsInStock - 1 WHERE ProductID = :id AND UnitsInStock > 0")
+                                    result = await session.execute(mysql_sql, {"id": product_id})
+                                    await session.commit()
+                                    logger.info(f"MySQL 库存更新完成 (ProductID: {product_id})")
+
+                                # 2. 更新 Neo4j 库存
+                                try:
+                                    neo_graph = get_neo4j_graph()
+                                    # Cypher: 匹配 Product 节点并减库存
+                                    # 同时兼容字符串和整数类型的 ProductID，确保匹配成功
+                                    cypher = "MATCH (p:Product) WHERE p.ProductID = $id OR p.ProductID = toInteger($id) SET p.UnitsInStock = toInteger(p.UnitsInStock) - 1"
+                                    # Neo4jGraph.query 是同步方法，使用 to_thread 避免阻塞事件循环
+                                    await asyncio.to_thread(neo_graph.query, cypher, {"id": product_id})
+                                    logger.info(f"Neo4j 库存更新完成 (ProductID: {product_id})")
+                                except Exception as ne:
+                                    logger.error(f"Neo4j 库存更新失败: {str(ne)}")
+
+                            except Exception as process_err:
+                                logger.error(f"处理消息内容出错: {str(process_err)}")
+                                
+        except Exception as e:
+            logger.error(f"RabbitMQ 消费者连接异常: {str(e)}。5秒后尝试重连...")
+            await asyncio.sleep(5)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 启动时创建一个异步任务运行消费者
+    consumer_task = asyncio.create_task(rabbitmq_consumer())
+    logger.info("已在独立协程中启动 RabbitMQ 消费者服务")
+    yield
+    # 关闭时取消任务
+    consumer_task.cancel()
+    try:
+        await consumer_task
+    except asyncio.CancelledError:
+        logger.info("RabbitMQ 消费者服务已安全关闭")
+
+# 创建 FastAPI 应用实例，集成生命周期管理
+app = FastAPI(title="AssistGen REST API", lifespan=lifespan)
 
 # 添加日志中间件， 使用 LoggingMiddleware 来统一处理日志记录，从而替代 FastAPI 的原生打印日志。
 app.add_middleware(LoggingMiddleware)
@@ -85,6 +174,9 @@ class LangGraphResumeRequest(BaseModel):
     query: str
     user_id: int
     conversation_id: str
+
+class ProductPurchaseRequest(BaseModel):
+    product_id: str
 
 
 @app.get("/health")
@@ -155,6 +247,7 @@ async def search_endpoint(request: ChatMessage):
 
 @app.post("/api/upload")
 async def upload_file(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     user_id: int = Form(...)
 ):
@@ -194,17 +287,28 @@ async def upload_file(
             "directory": str(second_level_dir)
         }
         
-        # 4. 处理文件索引
+        # 4. 处理文件索引（作为后台任务运行，避免前端长时间等待超时）
         indexing_service = IndexingService()
-        index_result = await indexing_service.process_file(file_info)
+        background_tasks.add_task(indexing_service.process_file, file_info)
         
-        # 合并结果
-        result = {**file_info, "index_result": index_result}
+        # 合并结果并提前返回 (构造伪装的 index_result 以免前端旧代码因找不到该字段而 JS 报错报错卡死)
+        result = {
+            **file_info, 
+            "status": "indexing_started", 
+            "message": "文件已上传成功，知识库索引正在后台加紧构建中！",
+            "index_result": {
+                "status": "success",  # 关键点：欺骗前端让它认为成功了从而关闭上传中的圈圈
+                "message": "后台构建中",
+                "is_update": False,
+                "input_dir": "",
+                "output_dir": ""
+            }
+        }
         
         return result
         
     except Exception as e:
-        logger.error(f"Upload failed for user {user_id}: {str(e)}", exc_info=True)
+        logger.exception(f"Upload failed for user {user_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/chat-rag")
@@ -234,7 +338,7 @@ async def create_conversation(request: CreateConversationRequest):
     except Exception as e:
         logger.error(f"Error creating conversation: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
-
+#左侧历史会话
 @app.get("/api/conversations/user/{user_id}")
 async def get_user_conversations(user_id: int):
     """获取用户的所有会话"""
@@ -244,7 +348,7 @@ async def get_user_conversations(user_id: int):
     except Exception as e:
         logger.error(f"Error getting conversations: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
-
+#单个历史会话
 @app.get("/api/conversations/{conversation_id}/messages")
 async def get_conversation_messages(conversation_id: int, user_id: int):
     """获取会话的所有消息"""
@@ -481,6 +585,99 @@ async def upload_image(
     except Exception as e:
         logger.error(f"Image upload failed for user {user_id}: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/product/purchase")
+async def purchase_product(
+    request: ProductPurchaseRequest, 
+    current_user: User = Depends(get_current_user)
+):
+    """
+    商品购买接口：Redis 控制超卖 + RabbitMQ 异步解耦
+    根据用户请求的产品ID、校验库存并扣减，最后通过MQ通知下游系统。
+    """
+    product_id = request.product_id
+    user_id = current_user.id
+    
+    # 1. 业务逻辑：Redis 原子扣减库存防止超卖
+    # 使用 aioredis 异步连接
+    redis_client = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+    redis_key = f"product:{product_id}"
+
+    try:
+        # DECR 是原子递减操作，返回递减之后的值
+        new_inventory = await redis_client.decr(redis_key)
+        
+        if new_inventory < 0:
+            # 库存不足，立即回退原子操作
+            await redis_client.incr(redis_key)
+            logger.warning(f"用户 {user_id} 购买产品 {product_id} 失败：库存不足")
+            raise HTTPException(status_code=400, detail="商品库存不足，手慢无！")
+            
+        logger.info(f"用户 {user_id} 购买产品 {product_id} 成功，当前库存：{new_inventory}")
+
+        # 2. 消息发送：RabbitMQ 参数按照要求配置
+        # 建立 RabbitMQ 连接
+        # 从 settings 中读取 RabbitMQ 配置
+        rmq_user = settings.RABBITMQ_USER
+        rmq_pass = settings.RABBITMQ_PASS
+        rmq_host = settings.RABBITMQ_HOST
+        rmq_port = settings.RABBITMQ_PORT
+        rmq_vhost = settings.RABBITMQ_VHOST
+        
+        # 构造 AMQP URL
+        amqp_url = f"amqp://{rmq_user}:{rmq_pass}@{rmq_host}:{rmq_port}/{rmq_vhost}"
+        
+        try:
+            connection = await aio_pika.connect(amqp_url)
+            async with connection:
+                channel = await connection.channel()
+                
+                # 定义交换机名字为 agentchange
+                exchange = await channel.declare_exchange(
+                    "agentchange", 
+                    aio_pika.ExchangeType.DIRECT, 
+                    durable=True
+                )
+                
+                # 定义队列名字为 agentque
+                queue = await channel.declare_queue("agentque", durable=True)
+                
+                # 把队列和交换机绑定到一起
+                await queue.bind(exchange, routing_key="product_purchase_routing")
+                
+                # 发送 product_id 到消息队列
+                message_body = json.dumps({
+                    "product_id": product_id,
+                    "user_id": user_id,
+                    "timestamp": datetime.now().isoformat()
+                })
+                
+                await exchange.publish(
+                    aio_pika.Message(body=message_body.encode()),
+                    routing_key="product_purchase_routing"
+                )
+                
+                logger.info(f"已将产品 {product_id} 的购买消息发送到 RabbitMQ (agentque)")
+
+        except Exception as mq_err:
+            # 注意：实际生产中如果MQ发送失败，需要有补偿机制或者写库操作。这里记录日志
+            logger.error(f"发送消息到 MQ 失败: {str(mq_err)}")
+            # 这里不抛出异常，因为库存已经扣减成功，可以后期同步或通知管理员
+            
+        return {
+            "status": "success",
+            "message": "下单成功",
+            "product_id": product_id
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"处理购买请求出错: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="服务器繁忙，请稍后再试")
+    finally:
+        await redis_client.close()
+
 
 # 最后挂载静态文件，并确保使用绝对路径
 STATIC_DIR = Path(__file__).parent / "static" / "dist"

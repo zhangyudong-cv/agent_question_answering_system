@@ -42,3 +42,6 @@ log/
 # Local development
 .env.local
 .env.*.local 
+
+llm_backend/app/graphrag/data/*
+!llm_backend/app/graphrag/data/settings*.yaml

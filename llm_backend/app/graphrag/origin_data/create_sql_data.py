@@ -932,11 +932,11 @@ def main():
             generate_categories(conn)
             generate_suppliers(conn)
             generate_shippers(conn)
-            generate_employees(conn, 3)  # 20名员工
-            generate_customers(conn, 20) # 100个客户
-            generate_products(conn, 10)  # 100个产品
-            generate_orders(conn, 100)   # 1000个订单
-            generate_reviews(conn, 30)   # 5000条评论
+            generate_employees(conn, 20)  # 20名员工
+            generate_customers(conn, 100) # 100个客户
+            generate_products(conn, 100)  # 100个产品
+            generate_orders(conn, 1000)   # 1000个订单
+            generate_reviews(conn, 2000)   # 5000条评论
             
             # 导出数据到CSV
             export_to_csv(conn)
