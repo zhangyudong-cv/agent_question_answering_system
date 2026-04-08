@@ -14,13 +14,6 @@
 - **支持 使用 Ollama 接入任意 Deepseek r1 模型系列**
 - **灵活的模配置**
 
-
-### 3. ollama 性能测试工具
-- 单请求性能测试
-- 并发性能测试
-- 系统资源监控
-- 自动化测试报告
-
 ## 快速启动
 
 ### 1. 安装依赖
@@ -58,7 +51,7 @@ DEEPSEEK_API_KEY=your-api-key
 DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
 DEEPSEEK_MODEL=deepseek-chat
 ```
-### 3. 安装Mysql数据库并在 `.env` 文件中配置数据库连接信息
+### 3. 安装Mysql，Redis，Rabbitmq，Neo4j数据库并在 `.env` 文件中配置数据库连接信息
 
 ### 4. 启动服务
 
@@ -167,13 +160,6 @@ MIT
 5. **WROTE** - 客户写评论: (Customer)-[:WROTE]->(Review)
 6. **ABOUT** - 评论关于商品: (Review)-[:ABOUT]->(Product)
 
-## 文件说明
-
-项目包含两个主要文件：
-
-1. **product_service.py** - 提供与Neo4j数据库交互的服务类，封装了各种查询商品信息的方法
-2. **frontend_demo.py** - 基于Flask的Web应用，提供Web界面和API端点，使用product_service获取数据
-
 ## 安装依赖
 
 ```bash
@@ -198,57 +184,6 @@ pip install neo4j flask
    export NEO4J_PASSWORD=your_password
    export NEO4J_DATABASE=neo4j
    ```
-
-## 使用ProductService
-
-```python
-from product_service import ProductService
-
-# 创建服务实例
-service = ProductService(
-    uri="bolt://localhost:7687",
-    username="neo4j",
-    password="password"
-)
-
-# 使用上下文管理器自动处理连接
-with service:
-    # 获取类别
-    categories = service.get_all_categories()
-    print(f"类别数量: {len(categories)}")
-    
-    # 根据类别获取商品
-    products = service.get_products_by_category("智能音箱")
-    print(f"智能音箱类别下的商品数量: {len(products)}")
-    
-    # 获取商品详情
-    product_details = service.get_product_details(1)
-    print(f"商品详情: {product_details}")
-    
-    # 搜索商品
-    search_results = service.search_products("智能")
-    print(f"搜索结果数量: {len(search_results)}")
-```
-
-## 运行Web应用
-
-```bash
-python frontend_demo.py
-```
-
-访问 http://localhost:5000 查看Web应用。
-
-## API端点
-
-以下是可用的API端点:
-
-- `GET /api/categories` - 获取所有商品类别
-- `GET /api/products/category/<category_name>` - 获取指定类别下的商品
-- `GET /api/products/<product_id>` - 获取指定商品的详细信息
-- `GET /api/products/search?keyword=<keyword>` - 搜索商品
-- `GET /api/products/featured` - 获取推荐商品
-- `GET /api/products/popular` - 获取热门商品
-- `GET /api/products/<product_id>/reviews` - 获取指定商品的评论
 
 ## 注意事项
 
