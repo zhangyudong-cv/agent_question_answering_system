@@ -78,17 +78,10 @@ uvicorn.run(
 - 前端界面：http://localhost:8000
 
 ## 技术栈
-
-- 后端：
   - FastAPI
   - SQLAlchemy
   - MySQL
   - Ollama/DeepSeek
-
-- 前端：
-  - Vue 3
-  - Element Plus
-  - TypeScript
 
 ## 注意事项
 
@@ -190,3 +183,8 @@ pip install neo4j flask
 1. 请确保Neo4j数据库已启动并已导入相关电商数据
 2. 若要在生产环境使用，请确保添加适当的认证和安全机制
 3. Web模板(HTML文件)需要自行创建在templates目录下 
+
+
+## 启动必备条件参考
+本地文档：[启动.pdf](启动.pdf)
+百度网盘备用：https://pan.baidu.com/s/117Rta1-OxmTWbkv_jcRFpA?pwd=7xqx 提取码: 7xqx
