@@ -717,6 +717,70 @@ async def purchase_product(
         await redis_client.close()
 
 
+@app.post("/api/product/purchase/direct")
+async def purchase_product_direct(
+    request: ProductPurchaseRequest, 
+    current_user: User = Depends(get_current_user)
+):
+    """
+    同步下单接口（直接操作数据库）：对标异步解耦方案。
+    逻辑：1. MySQL 事务内扣减库存 2. Neo4j 同步更新
+    字段：Products, UnitsInStock, ProductID (严格按照 consumer 要求)
+    """
+    product_id = request.product_id
+    user_id = current_user.id
+    
+    logger.info(f"用户 {user_id} 发起同步下单请求 (ProductID: {product_id})")
+
+    try:
+        # 1. 操作 MySQL (使用原子更新)
+        async with AsyncSessionLocal() as session:
+            # 采用原子扣减逻辑：UPDATE ... SET ... WHERE ... AND UnitsInStock > 0
+            # 严格遵循 Products 表和 ProductID 字段
+            mysql_sql = text("""
+                UPDATE graphrag.Products 
+                SET UnitsInStock = UnitsInStock - 1 
+                WHERE ProductID = :id AND UnitsInStock > 0
+            """)
+            
+            result = await session.execute(mysql_sql, {"id": product_id})
+            await session.commit()
+            
+            # 检查是否有行受影响（如果库存为 0，rowcount 会为 0）
+            if result.rowcount == 0:
+                logger.warning(f"MySQL 同步扣减失败：ID {product_id} 库存不足或商品不存在")
+                raise HTTPException(status_code=400, detail="商品库存不足，下单失败！")
+
+        # 2. 操作 Neo4j (同步扣减)
+        # 严格遵循 MATCH (p:Product) 和 p.ProductID 等字符
+        try:
+            neo_graph = get_neo4j_graph()
+            cypher = """
+                MATCH (p:Product) 
+                WHERE p.ProductID = $id OR p.ProductID = toInteger($id) 
+                SET p.UnitsInStock = toInteger(p.UnitsInStock) - 1
+            """
+            # 使用 to_thread 避免同步网络 IO 阻塞 FastAPI
+            await asyncio.to_thread(neo_graph.query, cypher, {"id": product_id})
+            logger.info(f"Neo4j 同步库存更新完成 (ProductID: {product_id})")
+        except Exception as ne:
+            # 即使 Neo4j 失败，也记录日志并警告
+            logger.error(f"Neo4j 同步更新出现次级故障: {str(ne)}")
+            
+        return {
+            "status": "success",
+            "message": "同步下单成功（直接写入库）",
+            "product_id": product_id,
+            "user_id": user_id
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"同步下单系统崩溃: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="服务器处理直连扣减时出错")
+
+
 # 最后挂载静态文件，并确保使用绝对路径
 STATIC_DIR = Path(__file__).parent / "static" / "dist"
 app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")

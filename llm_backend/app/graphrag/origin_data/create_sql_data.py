@@ -11,7 +11,7 @@ DB_CONFIG = {
     'host': '192.168.100.128',
     'port': 3307,
     'user': 'root',
-    'password': '123',
+    'password': '1234',
     'database': 'graphrag'
 }
 
